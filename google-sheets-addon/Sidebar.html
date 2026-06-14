@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Segoe UI', Arial, sans-serif; padding: 16px; background: #f8f9fa; color: #333; }
+      h2 { font-size: 18px; margin-bottom: 12px; color: #1a73e8; }
+      .tab { display: flex; gap: 4px; margin-bottom: 16px; }
+      .tab button { flex: 1; padding: 8px; border: none; background: #e8eaed; cursor: pointer; border-radius: 6px 6px 0 0; font-weight: 600; }
+      .tab button.active { background: #fff; border-bottom: 2px solid #1a73e8; }
+      .tab-content { display: none; background: #fff; padding: 16px; border-radius: 0 0 8px 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+      .tab-content.active { display: block; }
+      input, select, textarea { width: 100%; padding: 8px; margin: 6px 0 12px; border: 1px solid #dadce0; border-radius: 4px; font-size: 13px; }
+      button.primary { width: 100%; padding: 10px; background: #1a73e8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+      button.primary:hover { background: #1557b0; }
+      button.danger { background: #d93025; }
+      button.danger:hover { background: #b3261e; }
+      .status { margin-top: 8px; padding: 8px; border-radius: 4px; font-size: 12px; }
+      .status.ok { background: #e6f4ea; color: #137333; }
+      .status.error { background: #fce8e6; color: #c5221f; }
+      .status.info { background: #e8f0fe; color: #1a73e8; }
+      label { font-size: 12px; font-weight: 600; color: #5f6368; }
+      hr { margin: 12px 0; border: none; border-top: 1px solid #dadce0; }
+    </style>
+  </head>
+  <body>
+    <h2>QS BOQ AI</h2>
+
+    <div class="tab">
+      <button class="active" onclick="switchTab('generate', this)">Generate</button>
+      <button onclick="switchTab('chat', this)">Chat</button>
+      <button onclick="switchTab('settings', this)">Settings</button>
+    </div>
+
+    <!-- TAB GENERATE -->
+    <div id="tab-generate" class="tab-content active">
+      <label>Upload Gambar Kerja</label>
+      <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp,.tiff,.tif,.bmp,.heic,.heif,.dxf" />
+      <label>Skala (opsional)</label>
+      <input type="text" id="scaleInput" placeholder="0.01 untuk 1:100" />
+      <button class="primary" onclick="processFile()">Ekstrak Dimensi</button>
+      <button class="primary" onclick="generateBoq()" style="margin-top:8px">Generate BOQ ke Sheet</button>
+      <div id="generateStatus" class="status"></div>
+    </div>
+
+    <!-- TAB CHAT -->
+    <div id="tab-chat" class="tab-content">
+      <div id="chatMessages" style="height: 200px; overflow-y: auto; border: 1px solid #dadce0; border-radius: 4px; padding: 8px; margin-bottom: 8px; font-size: 12px;"></div>
+      <textarea id="chatInput" rows="2" placeholder="Tanya tentang BOQ..."></textarea>
+      <button class="primary" onclick="sendChat()">Kirim</button>
+      <div id="chatStatus" class="status"></div>
+    </div>
+
+    <!-- TAB SETTINGS -->
+    <div id="tab-settings" class="tab-content">
+      <label>API Key Gemini (BYOK)</label>
+      <input type="password" id="apiKeyInput" placeholder="Masukkan API key Anda" />
+      <button class="primary" onclick="saveByok()">Simpan Key</button>
+      <button class="primary danger" onclick="clearByok()">Hapus Key</button>
+      <div id="settingsStatus" class="status"></div>
+    </div>
+
+    <script>
+      let currentDimensions = null;
+
+      function switchTab(name, btn) {
+        document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
+        document.querySelectorAll('.tab button').forEach(function(el) { el.classList.remove('active'); });
+        document.getElementById('tab-' + name).classList.add('active');
+        btn.classList.add('active');
+      }
+
+      function setStatus(el, msg, type) {
+        el.textContent = msg;
+        el.className = 'status ' + type;
+      }
+
+      function processFile() {
+        var el = document.getElementById('generateStatus');
+        var file = document.getElementById('fileInput').files[0];
+        if (!file) { setStatus(el, 'Pilih file terlebih dahulu', 'error'); return; }
+        setStatus(el, 'Memproses...', 'info');
+
+        var scale = document.getElementById('scaleInput').value;
+        var formData = new FormData();
+        formData.append('file', file);
+        if (scale) formData.append('scale', scale);
+
+        google.script.run
+          .withSuccessHandler(function(resp) {
+            var data = JSON.parse(resp);
+            if (data.status === 'ok') {
+              currentDimensions = data;
+              setStatus(el, 'Ekstraksi berhasil: ' + (data.data.total_items || 0) + ' item', 'ok');
+            } else {
+              setStatus(el, 'Error: ' + data.message, 'error');
+            }
+          })
+          .withFailureHandler(function(err) {
+            setStatus(el, 'Gagal: ' + err, 'error');
+          })
+          .callBackend('/api/extract-file', /* perlu implementasi upload */);
+      }
+
+      function generateBoq() {
+        var el = document.getElementById('generateStatus');
+        if (!currentDimensions) { setStatus(el, 'Ekstrak dimensi dulu', 'error'); return; }
+        setStatus(el, 'Menulis ke sheet...', 'info');
+
+        google.script.run
+          .withSuccessHandler(function(resp) {
+            var data = JSON.parse(resp);
+            if (data.status === 'ok') {
+              setStatus(el, 'BOQ berhasil ditulis ke sheet', 'ok');
+            } else {
+              setStatus(el, 'Error: ' + data.message, 'error');
+            }
+          })
+          .withFailureHandler(function(err) {
+            setStatus(el, 'Gagal: ' + err, 'error');
+          })
+          .writeBoqToSheet(JSON.stringify(currentDimensions.data.items || []));
+      }
+
+      function sendChat() {
+        var input = document.getElementById('chatInput');
+        var msg = input.value.trim();
+        if (!msg) return;
+        var el = document.getElementById('chatStatus');
+
+        var chatBox = document.getElementById('chatMessages');
+        chatBox.innerHTML += '<div><b>User:</b> ' + msg + '</div>';
+
+        google.script.run
+          .withSuccessHandler(function(resp) {
+            var data = JSON.parse(resp);
+            chatBox.innerHTML += '<div><b>AI:</b> ' + data.response_text + '</div>';
+            chatBox.scrollTop = chatBox.scrollHeight;
+            setStatus(el, '', '');
+          })
+          .withFailureHandler(function(err) {
+            setStatus(el, 'Error: ' + err, 'error');
+          })
+          .callBackend('/api/chat', { user_message: msg });
+
+        input.value = '';
+      }
+
+      function saveByok() {
+        var el = document.getElementById('settingsStatus');
+        var key = document.getElementById('apiKeyInput').value.trim();
+        if (!key) { setStatus(el, 'Masukkan API key', 'error'); return; }
+        google.script.run
+          .withSuccessHandler(function(resp) {
+            setStatus(el, 'API key tersimpan (terenkripsi)', 'ok');
+          })
+          .withFailureHandler(function(err) {
+            setStatus(el, 'Error: ' + err, 'error');
+          })
+          .callBackend('/api/byok/save', { api_key: key });
+      }
+
+      function clearByok() {
+        var el = document.getElementById('settingsStatus');
+        document.getElementById('apiKeyInput').value = '';
+        google.script.run
+          .withSuccessHandler(function(resp) {
+            setStatus(el, 'API key dihapus', 'ok');
+          })
+          .withFailureHandler(function(err) {
+            setStatus(el, 'Error: ' + err, 'error');
+          })
+          .callBackend('/api/byok/delete', {});
+      }
+    </script>
+  </body>
+</html>

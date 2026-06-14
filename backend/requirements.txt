@@ -1,0 +1,32 @@
+fastapi==0.115.0
+uvicorn==0.30.0
+python-multipart==0.0.9
+
+# PDF processing (pymupdf untuk extract vector PDF — install manual jika perlu)
+# pymupdf==1.24.9
+# pdfplumber==0.11.4
+
+# Image processing
+Pillow==10.4.0
+# pillow-heif==0.18.0   # HEIC/HEIF support — install jika perlu
+
+# OCR (berat — install manual: pip install paddlepaddle paddleocr)
+# paddleocr==2.8.1
+# paddlepaddle==2.6.1
+
+# CAD (ezdxf untuk DXF — install manual)
+# ezdxf==1.3.4
+
+# Excel
+openpyxl==3.1.5
+# pandas==2.2.2         # install jika perlu CSV export
+
+# LLM
+google-generativeai==0.8.3
+# groq==0.11.0           # install jika punya Groq API key
+openai==1.51.0
+
+# Infrastructure
+redis==5.1.0
+cryptography==43.0.1
+python-dotenv==1.0.1

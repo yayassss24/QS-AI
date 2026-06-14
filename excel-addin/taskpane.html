@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QS BOQ AI</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Segoe UI', Arial, sans-serif; padding: 16px; background: #f8f9fa; color: #333; }
+      h2 { font-size: 18px; margin-bottom: 12px; color: #1a73e8; }
+      input, textarea { width: 100%; padding: 8px; margin: 6px 0 12px; border: 1px solid #dadce0; border-radius: 4px; }
+      button { width: 100%; padding: 10px; background: #1a73e8; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; margin-bottom: 8px; }
+      button:hover { background: #1557b0; }
+      .status { padding: 8px; border-radius: 4px; font-size: 12px; margin-top: 8px; }
+      label { font-size: 12px; font-weight: 600; color: #5f6368; }
+    </style>
+  </head>
+  <body>
+    <h2>QS BOQ AI</h2>
+    <label>Upload Gambar Kerja</label>
+    <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp,.tiff,.tif,.bmp,.heic,.heif,.dxf" />
+    <button onclick="processFile()">Ekstrak Dimensi</button>
+    <button onclick="writeToSheet()">Tulis ke Sheet</button>
+    <div id="status" class="status"></div>
+
+    <script src="taskpane.js"></script>
+  </body>
+</html>
