@@ -1,6 +1,6 @@
 /**
  * QS BOQ AI — Excel Add-in Taskpane
- * 
+ *
  * BACKEND_URL dapat dikonfigurasi via:
  * 1. Query parameter ?backend=http://localhost:8000
  * 2. Fallback ke window.location.origin (jika diserve dari backend)
@@ -31,6 +31,7 @@ function setStatus(msg, type) {
   el.className = "status " + (type || "");
 }
 
+// === EXTRACT DIMENSIONS ===
 async function processFile() {
   var fileInput = document.getElementById("fileInput");
   var file = fileInput.files[0];
@@ -63,60 +64,146 @@ async function processFile() {
   }
 }
 
-async function writeToSheet() {
+// === READ HEADERS FROM ACTIVE SHEET ===
+async function getSheetHeaders() {
+  return new Promise(function (resolve, reject) {
+    Excel.run(function (context) {
+      var sheet = context.workbook.worksheets.getActiveWorksheet();
+      var range = sheet.getRange("1:3");
+      range.load("values");
+      return context.sync().then(function () {
+        var headers = [];
+        var row1 = range.values[0] || [];
+        for (var col = 0; col < row1.length; col++) {
+          if (row1[col] !== null && row1[col] !== undefined && String(row1[col]).trim() !== "") {
+            headers.push(String(row1[col]).trim());
+          }
+        }
+        if (headers.length === 0) {
+          var row2 = range.values[1] || [];
+          for (var col = 0; col < row2.length; col++) {
+            if (row2[col] !== null && row2[col] !== undefined && String(row2[col]).trim() !== "") {
+              headers.push(String(row2[col]).trim());
+            }
+          }
+        }
+        resolve(headers);
+      });
+    }).catch(function (err) {
+      reject(err);
+    });
+  });
+}
+
+// === GENERATE BOQ ===
+async function generateBoq() {
   if (!currentDimensions) {
     setStatus("Ekstrak dimensi dulu", "error");
     return;
   }
 
-  setStatus("Menulis ke Excel...", "info");
+  setStatus("Mendeteksi template...", "info");
 
   try {
-    await Excel.run(async function (context) {
-      var sheet = context.workbook.worksheets.getActiveWorksheet();
+    var headers = await getSheetHeaders();
+    if (headers.length === 0) {
+      setStatus("Tidak bisa membaca header sheet. Isi header di baris 1-3.", "error");
+      return;
+    }
 
-      var items = currentDimensions.items || [];
-      var row = 1;
+    setStatus("Menghitung BOQ...", "info");
 
-      for (var i = 0; i < items.length; i++) {
-        var item = items[i];
-        var pCell = sheet.getCell(row, 2);
-        var lCell = sheet.getCell(row, 3);
-        var tCell = sheet.getCell(row, 4);
-        var volCell = sheet.getCell(row, 5);
-
-        if (item.P != null) {
-          pCell.values = [[item.P]];
-          pCell.format.fill.color = "#EEEDFE";
-        }
-        if (item.L != null) {
-          lCell.values = [[item.L]];
-          lCell.format.fill.color = "#EEEDFE";
-        }
-        if (item.T != null) {
-          tCell.values = [[item.T]];
-          tCell.format.fill.color = "#EEEDFE";
-        }
-
-        if (item.P != null && item.L != null && item.T != null) {
-          volCell.formulas = [["=B" + (row + 1) + "*C" + (row + 1) + "*D" + (row + 1)]];
-        }
-
-        if (item.confidence < 0.7) {
-          pCell.format.fill.color = "#FAEEDA";
-          lCell.format.fill.color = "#FAEEDA";
-          tCell.format.fill.color = "#FAEEDA";
-          var comment = sheet.comments.add(pCell);
-          comment.text = "Perlu verifikasi manual";
-        }
-
-        row++;
-      }
-
-      await context.sync();
-      setStatus("BOQ berhasil ditulis", "ok");
+    var items = currentDimensions.items || (Array.isArray(currentDimensions) ? currentDimensions : []);
+    var resp = await fetch(BACKEND_URL + "/api/compute-boq-from-json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        dimensions: { items: items },
+        headers: headers,
+      }),
     });
+    var data = await resp.json();
+
+    if (data.status !== "ok") {
+      setStatus("Error: " + (data.message || "Gagal"), "error");
+      return;
+    }
+
+    setStatus("Menulis ke Excel...", "info");
+    await writeBoqToSheet(data.data);
+
   } catch (err) {
-    setStatus("Error: " + err.message, "error");
+    setStatus("Gagal: " + err.message, "error");
   }
+}
+
+// === COLUMN LETTER TO INDEX ===
+function colLetterToIndex(letters) {
+  var index = 0;
+  for (var i = 0; i < letters.length; i++) {
+    index = index * 26 + (letters.charCodeAt(i) - 64);
+  }
+  return index - 1; // zero-based
+}
+
+// === WRITE BOQ TO SHEET ===
+async function writeBoqToSheet(boqData) {
+  var items = boqData.items || [];
+
+  await Excel.run(async function (context) {
+    var sheet = context.workbook.worksheets.getActiveWorksheet();
+
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+
+      Object.entries(item.cells || {}).forEach(function (_a) {
+        var cellAddr = _a[0];
+        var cellInfo = _a[1];
+
+        var match = cellAddr.match(/([A-Z]+)(\d+)/);
+        if (!match) return;
+        var colLetter = match[1];
+        var rowNum = parseInt(match[2], 10);
+        var colIndex = colLetterToIndex(colLetter);
+
+        var cell = sheet.getCell(rowNum - 1, colIndex);
+
+        if (cellInfo.type === "formula") {
+          cell.formulas = [[cellInfo.value]];
+        } else if (cellInfo.value !== null && cellInfo.value !== undefined) {
+          cell.values = [[cellInfo.value]];
+        }
+        if (cellInfo.color) {
+          cell.format.fill.color = cellInfo.color;
+        }
+      });
+
+      Object.entries(item.comments || {}).forEach(function (_a) {
+        var cellAddr = _a[0];
+        var comment = _a[1];
+
+        var match = cellAddr.match(/([A-Z]+)(\d+)/);
+        if (!match) return;
+        var colLetter = match[1];
+        var rowNum = parseInt(match[2], 10);
+        var colIndex = colLetterToIndex(colLetter);
+
+        var cell = sheet.getCell(rowNum - 1, colIndex);
+        try {
+          var c = sheet.comments.add(cell);
+          c.text = comment;
+        } catch (e) {
+          // comment mungkin sudah ada
+        }
+        if (comment.includes("⚠️")) {
+          cell.format.fill.color = "#FAEEDA";
+        }
+      });
+    }
+
+    await context.sync();
+    setStatus("BOQ berhasil ditulis (" + items.length + " item)", "ok");
+  }).catch(function (err) {
+    setStatus("Error: " + err.message, "error");
+  });
 }

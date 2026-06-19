@@ -12,9 +12,11 @@ BACKEND_DIR = str(Path(__file__).resolve().parent.parent)
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-# Set a default BYOK key for tests that don't mock it
+# Set default keys for tests that don't mock them
 if "BYOK_ENCRYPTION_KEY" not in os.environ:
     os.environ["BYOK_ENCRYPTION_KEY"] = "dGVzdC1mZXJuZXQta2V5LTEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNA=="
+if "9ROUTER_API_KEY" not in os.environ:
+    os.environ["9ROUTER_API_KEY"] = "sk-test-key-for-tests"
 
 # Disable startup events for main.py tests
 os.environ.setdefault("TESTING", "1")

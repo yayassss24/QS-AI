@@ -16,17 +16,23 @@
       button.primary:hover { background: #1557b0; }
       button.danger { background: #d93025; }
       button.danger:hover { background: #b3261e; }
+      button.secondary { background: #e8eaed; color: #333; }
+      button.secondary:hover { background: #d2d5d9; }
       .status { margin-top: 8px; padding: 8px; border-radius: 4px; font-size: 12px; }
       .status.ok { background: #e6f4ea; color: #137333; }
       .status.error { background: #fce8e6; color: #c5221f; }
       .status.info { background: #e8f0fe; color: #1a73e8; }
       label { font-size: 12px; font-weight: 600; color: #5f6368; }
       hr { margin: 12px 0; border: none; border-top: 1px solid #dadce0; }
+      .user-id-display { font-size: 11px; color: #5f6368; word-break: break-all; margin-bottom: 8px; }
     </style>
   </head>
   <body>
     <h2>QS BOQ AI</h2>
 
+    <div style="font-size:11px;color:#5f6368;margin-bottom:8px;">
+      Generate BOQ juga bisa dari <b>Extensions → QS BOQ AI → Generate BOQ dari Sheet</b>
+    </div>
     <div class="tab">
       <button class="active" onclick="switchTab('generate', this)">Generate</button>
       <button onclick="switchTab('chat', this)">Chat</button>
@@ -54,6 +60,10 @@
 
     <!-- TAB SETTINGS -->
     <div id="tab-settings" class="tab-content">
+      <label>User ID</label>
+      <div id="userIdDisplay" class="user-id-display">Memuat...</div>
+      <button class="primary secondary" onclick="copyUserId()">Salin User ID</button>
+      <hr />
       <label>API Key Gemini (BYOK)</label>
       <input type="password" id="apiKeyInput" placeholder="Masukkan API key Anda" />
       <button class="primary" onclick="saveByok()">Simpan Key</button>
@@ -62,7 +72,8 @@
     </div>
 
     <script>
-      let currentDimensions = null;
+      var currentDimensions = null;
+      var currentMapping = null;
 
       function switchTab(name, btn) {
         document.querySelectorAll('.tab-content').forEach(function(el) { el.classList.remove('active'); });
@@ -76,94 +87,165 @@
         el.className = 'status ' + type;
       }
 
-      function processFile() {
-        var el = document.getElementById('generateStatus');
-        var file = document.getElementById('fileInput').files[0];
-        if (!file) { setStatus(el, 'Pilih file terlebih dahulu', 'error'); return; }
-        setStatus(el, 'Memproses...', 'info');
+      // Load user ID on init
+      google.script.run
+        .withSuccessHandler(function(userId) {
+          document.getElementById('userIdDisplay').textContent = userId;
+        })
+        .getUserSessionId();
 
-        var scale = document.getElementById('scaleInput').value;
-        var formData = new FormData();
-        formData.append('file', file);
-        if (scale) formData.append('scale', scale);
-
-        google.script.run
-          .withSuccessHandler(function(resp) {
-            var data = JSON.parse(resp);
-            if (data.status === 'ok') {
-              currentDimensions = data;
-              setStatus(el, 'Ekstraksi berhasil: ' + (data.data.total_items || 0) + ' item', 'ok');
-            } else {
-              setStatus(el, 'Error: ' + data.message, 'error');
-            }
-          })
-          .withFailureHandler(function(err) {
-            setStatus(el, 'Gagal: ' + err, 'error');
-          })
-          .callBackend('/api/extract-file', /* perlu implementasi upload */);
+      function copyUserId() {
+        var el = document.getElementById('userIdDisplay');
+        var userId = el.textContent;
+        if (!userId || userId === 'Memuat...') return;
+        var ta = document.createElement('textarea');
+        ta.value = userId;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        setStatus(document.getElementById('settingsStatus'), 'User ID disalin', 'ok');
       }
 
+      // === FILE PROCESSING ===
+      function processFile() {
+        var el = document.getElementById('generateStatus');
+        var fileInput = document.getElementById('fileInput');
+        var file = fileInput.files[0];
+        if (!file) { setStatus(el, 'Pilih file terlebih dahulu', 'error'); return; }
+        setStatus(el, 'Membaca file...', 'info');
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          var base64 = e.target.result.split(',')[1];
+          var scale = document.getElementById('scaleInput').value;
+          setStatus(el, 'Mengirim ke server...', 'info');
+
+          google.script.run
+            .withSuccessHandler(function(resp) {
+              var data = typeof resp === 'string' ? JSON.parse(resp) : resp;
+              if (data.status === 'ok') {
+                currentDimensions = data.data;
+                currentMapping = data.data.mapping || null;
+                var total = data.data && data.data.items ? data.data.items.length : 0;
+                setStatus(el, 'Ekstraksi berhasil: ' + total + ' item', 'ok');
+              } else {
+                setStatus(el, 'Error: ' + (data.message || 'Gagal'), 'error');
+              }
+            })
+            .withFailureHandler(function(err) {
+              setStatus(el, 'Gagal: ' + err, 'error');
+            })
+            .processFileUpload(base64, file.name, file.type, scale);
+        };
+        reader.onerror = function() {
+          setStatus(el, 'Gagal membaca file', 'error');
+        };
+        reader.readAsDataURL(file);
+      }
+
+      // === GENERATE BOQ ===
       function generateBoq() {
         var el = document.getElementById('generateStatus');
         if (!currentDimensions) { setStatus(el, 'Ekstrak dimensi dulu', 'error'); return; }
-        setStatus(el, 'Menulis ke sheet...', 'info');
+        setStatus(el, 'Menghitung BOQ...', 'info');
+
+        var items = currentDimensions.items || (currentDimensions.constructor === Array ? currentDimensions : []);
+        var dimensionsJson = JSON.stringify({ items: items });
 
         google.script.run
           .withSuccessHandler(function(resp) {
-            var data = JSON.parse(resp);
+            var data = typeof resp === 'string' ? JSON.parse(resp) : resp;
             if (data.status === 'ok') {
-              setStatus(el, 'BOQ berhasil ditulis ke sheet', 'ok');
+              setStatus(el, 'BOQ siap, menulis ke sheet...', 'info');
+              writeToSheet(data.data);
             } else {
-              setStatus(el, 'Error: ' + data.message, 'error');
+              setStatus(el, 'Error: ' + (data.message || 'Gagal'), 'error');
             }
           })
           .withFailureHandler(function(err) {
             setStatus(el, 'Gagal: ' + err, 'error');
           })
-          .writeBoqToSheet(JSON.stringify(currentDimensions.data.items || []));
+          .generateBoq(dimensionsJson);
       }
 
+      function writeToSheet(boqData) {
+        var items = boqData.items || [];
+        google.script.run
+          .withSuccessHandler(function(resp) {
+            var data = typeof resp === 'string' ? JSON.parse(resp) : resp;
+            if (data.status === 'ok') {
+              setStatus(document.getElementById('generateStatus'), 'BOQ berhasil ditulis ke sheet (' + data.total + ' item)', 'ok');
+            } else {
+              setStatus(document.getElementById('generateStatus'), 'Error: ' + data.message, 'error');
+            }
+          })
+          .withFailureHandler(function(err) {
+            setStatus(document.getElementById('generateStatus'), 'Gagal: ' + err, 'error');
+          })
+          .writeBoqFormulaData(JSON.stringify(items));
+      }
+
+      // === CHAT ===
       function sendChat() {
         var input = document.getElementById('chatInput');
         var msg = input.value.trim();
         if (!msg) return;
         var el = document.getElementById('chatStatus');
-
         var chatBox = document.getElementById('chatMessages');
-        chatBox.innerHTML += '<div><b>User:</b> ' + msg + '</div>';
+
+        chatBox.innerHTML += '<div><b>User:</b> ' + escapeHtml(msg) + '</div>';
 
         google.script.run
           .withSuccessHandler(function(resp) {
-            var data = JSON.parse(resp);
-            chatBox.innerHTML += '<div><b>AI:</b> ' + data.response_text + '</div>';
+            var data = typeof resp === 'string' ? JSON.parse(resp) : resp;
+            var reply = 'Tidak ada respon';
+            if (data.status === 'ok' && data.data) {
+              reply = data.data.response_text || JSON.stringify(data.data);
+            } else if (data.response_text) {
+              reply = data.response_text;
+            } else if (data.message) {
+              reply = data.message;
+            }
+            chatBox.innerHTML += '<div><b>AI:</b> ' + escapeHtml(reply) + '</div>';
             chatBox.scrollTop = chatBox.scrollHeight;
             setStatus(el, '', '');
           })
           .withFailureHandler(function(err) {
             setStatus(el, 'Error: ' + err, 'error');
           })
-          .callBackend('/api/chat', { user_message: msg });
+          .sendChatMessage(msg);
 
         input.value = '';
       }
 
+      // === BYOK ===
       function saveByok() {
         var el = document.getElementById('settingsStatus');
         var key = document.getElementById('apiKeyInput').value.trim();
         if (!key) { setStatus(el, 'Masukkan API key', 'error'); return; }
+        setStatus(el, 'Menyimpan...', 'info');
+
         google.script.run
           .withSuccessHandler(function(resp) {
-            setStatus(el, 'API key tersimpan (terenkripsi)', 'ok');
+            var data = typeof resp === 'string' ? JSON.parse(resp) : resp;
+            if (data.status === 'ok') {
+              setStatus(el, 'API key tersimpan (terenkripsi)', 'ok');
+            } else {
+              setStatus(el, 'Error: ' + (data.data && data.data.error ? data.data.error : 'Gagal'), 'error');
+            }
           })
           .withFailureHandler(function(err) {
             setStatus(el, 'Error: ' + err, 'error');
           })
-          .callBackend('/api/byok/save', { api_key: key });
+          .saveByok(key);
       }
 
       function clearByok() {
         var el = document.getElementById('settingsStatus');
         document.getElementById('apiKeyInput').value = '';
+        setStatus(el, 'Menghapus...', 'info');
+
         google.script.run
           .withSuccessHandler(function(resp) {
             setStatus(el, 'API key dihapus', 'ok');
@@ -171,7 +253,13 @@
           .withFailureHandler(function(err) {
             setStatus(el, 'Error: ' + err, 'error');
           })
-          .callBackend('/api/byok/delete', {});
+          .clearByok();
+      }
+
+      function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
       }
     </script>
   </body>

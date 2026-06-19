@@ -11,16 +11,23 @@ Menyediakan 6 endpoint:
 5. POST /api/chat             — QS Assistant chat
 6. POST /api/byok/validate    — Validasi BYOK API key
 7. POST /api/byok/save        — Simpan BYOK API key
+8. POST /api/byok/delete      — Hapus BYOK API key user
+9. POST /api/compute-boq      — Compute BOQ formula & return JSON (dengan template file)
+10. POST /api/compute-boq-from-json — Compute BOQ formula dari JSON headers (untuk Excel Add-in)
 """
 
 import json
 import os
 import tempfile
 from pathlib import Path
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
+env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 app = FastAPI(title="QS BOQ AI Extension API")
 
@@ -62,6 +69,29 @@ async def health():
         "status": "ok",
         "service": "QS BOQ AI Extension API",
         "byok_active": byok_manager is not None,
+    }
+
+
+@app.get("/api/addin-info")
+async def addin_info():
+    """Info untuk install Excel Add-in / Google Sheets Add-in."""
+    manifest_url = f"{os.getenv('PUBLIC_URL', 'http://localhost:8000')}/static/excel-addin/manifest.xml"
+    return {
+        "status": "ok",
+        "excel": {
+            "name": "QS BOQ AI",
+            "manifest_url": manifest_url,
+            "install": "Excel -> Insert -> Get Add-ins -> From URL",
+        },
+        "google_sheets": {
+            "folder": "google-sheets-addin/",
+            "files": ["Code.gs", "Sidebar.html"],
+            "install": "Extensions -> Apps Script -> copy Code.gs + Sidebar.html",
+        },
+        "backend": {
+            "url": os.getenv("9ROUTER_BASE_URL", "http://localhost:20128/v1"),
+            "model": os.getenv("9ROUTER_MODEL", "groq/llama-3.3-70b-versatile"),
+        },
     }
 
 
@@ -181,6 +211,97 @@ async def generate_boq(
             os.unlink(template_path)
 
 
+@app.post("/api/compute-boq")
+async def compute_boq(
+    template_file: UploadFile = File(...),
+    dimensions_json: str = Form(...),
+    user_id: str = Form(""),
+):
+    """Compute BOQ formulas dan return JSON cell data (untuk GAS/Excel Add-in)."""
+    try:
+        dimensions = json.loads(dimensions_json)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "dimensions_json harus berupa JSON array yang valid")
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        tmp.write(await template_file.read())
+        template_path = tmp.name
+
+    try:
+        from modules.template_detector import detect_template_format
+        from modules.formula_engine import build_formula
+
+        mapping = detect_template_format(template_path)
+        boq_data = []
+
+        for i, item in enumerate(dimensions.get("items", [])):
+            formula_data = build_formula(
+                item=item,
+                mapping=mapping["mapping"],
+                row=mapping["data_start_row"] + i,
+                case=mapping["case"],
+            )
+            boq_data.append(formula_data)
+
+        return {
+            "status": "ok",
+            "data": {
+                "items": boq_data,
+                "mapping": mapping["mapping"],
+                "data_start_row": mapping["data_start_row"],
+            },
+        }
+    finally:
+        if os.path.exists(template_path):
+            os.unlink(template_path)
+
+
+@app.post("/api/compute-boq-from-json")
+async def compute_boq_from_json(request: dict):
+    """Compute BOQ formulas dari JSON headers (untuk Excel Add-in tanpa upload template)."""
+    dimensions = request.get("dimensions")
+    headers = request.get("headers")
+    if not dimensions or not headers:
+        raise HTTPException(400, "dimensions dan headers required")
+
+    from modules.template_detector import detect_template_format
+    from modules.formula_engine import build_formula
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    for col, header in enumerate(headers, 1):
+        ws.cell(1, col).value = header
+    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False)
+    wb.save(tmp.name)
+    wb.close()
+    tmp.close()
+
+    try:
+        mapping = detect_template_format(tmp.name)
+        boq_data = []
+        for i, item in enumerate(dimensions.get("items", [])):
+            formula_data = build_formula(
+                item=item,
+                mapping=mapping["mapping"],
+                row=mapping["data_start_row"] + i,
+                case=mapping["case"],
+            )
+            boq_data.append(formula_data)
+
+        return {
+            "status": "ok",
+            "data": {
+                "items": boq_data,
+                "mapping": mapping["mapping"],
+                "data_start_row": mapping["data_start_row"],
+            },
+        }
+    finally:
+        if os.path.exists(tmp.name):
+            os.unlink(tmp.name)
+
+
 @app.post("/api/chat")
 async def chat(request: dict):
     """QS Assistant chat. Body: {user_message, boq_state, template_mapping, file_names, user_id}"""
@@ -225,3 +346,15 @@ async def save_byok(request: dict):
         raise HTTPException(400, "user_id dan api_key required")
     success = byok_manager.save_key(user_id, api_key)
     return {"status": "ok" if success else "error", "data": {"saved": success}}
+
+
+@app.post("/api/byok/delete")
+async def delete_byok(request: dict):
+    """Hapus API key user (terenkripsi)."""
+    if byok_manager is None:
+        raise HTTPException(503, "BYOK service tidak tersedia")
+    user_id = request.get("user_id")
+    if not user_id:
+        raise HTTPException(400, "user_id required")
+    deleted = byok_manager.delete_key(user_id)
+    return {"status": "ok", "data": {"deleted": deleted}}

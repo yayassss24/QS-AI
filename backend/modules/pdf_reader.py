@@ -5,7 +5,7 @@ Ekstraksi dimensi dari file PDF gambar kerja konstruksi.
 Menggunakan 3 layer:
   Layer 1: PyMuPDF — PDF vector (paling akurat, paling cepat)
   Layer 2: PaddleOCR — PDF scan / gambar foto
-  Layer 3: Gemini Vision — fallback untuk gambar kompleks
+  Layer 3: 9router Vision — fallback untuk gambar kompleks
 """
 
 import base64
@@ -13,7 +13,7 @@ import json
 import re
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 
 def _extract_vector_pdf(file_path: str) -> list[dict]:
@@ -91,12 +91,12 @@ def _extract_scanned_pdf(file_path: str) -> list[dict]:
     return results
 
 
-def _extract_via_gemini_vision(
+def _extract_via_9router_vision(
     file_path: str,
     llm_router,
 ) -> list[dict]:
     """
-    Layer 3: Ekstrak dimensi menggunakan Gemini Vision sebagai fallback.
+    Layer 3: Ekstrak dimensi menggunakan 9router Vision sebagai fallback.
 
     Args:
         file_path: Path ke file PDF
@@ -191,6 +191,18 @@ def extract_dimensions_from_pdf(
     Returns:
         dict dengan status, source, items, items_flagged
     """
+    def _apply_scale(items_list: list[dict], scale_val: Optional[float]) -> list[dict]:
+        if scale_val is None or scale_val == 1.0:
+            return items_list
+        for item in items_list:
+            if item.get("P") is not None:
+                item["P"] = round(item["P"] * scale_val, 4)
+            if item.get("L") is not None:
+                item["L"] = round(item["L"] * scale_val, 4)
+            if item.get("T") is not None:
+                item["T"] = round(item["T"] * scale_val, 4)
+        return items_list
+
     try:
         vector_results = _extract_vector_pdf(file_path)
         vector_ok, _ = _assess_quality(vector_results, [])
@@ -222,8 +234,8 @@ def extract_dimensions_from_pdf(
                             "confidence": t.get("confidence"),
                         })
             elif llm_router:
-                source = "gemini_vision"
-                vision_results = _extract_via_gemini_vision(file_path, llm_router)
+                source = "9router_vision"
+                vision_results = _extract_via_9router_vision(file_path, llm_router)
                 items_ok: list[dict] = []
                 items_flagged: list[dict] = []
                 for page in vision_results:
@@ -235,6 +247,8 @@ def extract_dimensions_from_pdf(
                         else:
                             item["alasan_flag"] = item.get("catatan", "Confidence rendah")
                             items_flagged.append(item)
+                items_ok = _apply_scale(items_ok, scale)
+                items_flagged = _apply_scale(items_flagged, scale)
                 return {
                     "status": "ok",
                     "source": source,
@@ -265,6 +279,8 @@ def extract_dimensions_from_pdf(
                 "sumber": f"PDF halaman {t['page']}",
                 "teks_mentah": t["text"],
             })
+
+        items_ok = _apply_scale(items_ok, scale)
 
         return {
             "status": "ok",

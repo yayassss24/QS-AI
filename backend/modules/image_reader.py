@@ -4,7 +4,7 @@ modules/image_reader.py
 Ekstraksi dimensi dari file gambar raster (JPG, PNG, WEBP, TIFF, BMP, HEIC).
 Menggunakan 2 layer:
   Layer 1: PaddleOCR — ekstraksi teks dari gambar (cepat, akurat untuk angka)
-  Layer 2: Gemini Vision — analisis gambar secara komprehensif (fallback + verifikasi)
+  Layer 2: 9router Vision — analisis gambar secara komprehensif (fallback + verifikasi)
 """
 
 import base64
@@ -120,7 +120,7 @@ def _analyze_with_vision(
     ocr_texts: Optional[list[dict]] = None,
 ) -> list[dict]:
     """
-    Layer 2: Gemini Vision — analisis komprehensif gambar kerja.
+    Layer 2: 9router Vision — analisis komprehensif gambar kerja.
 
     Args:
         image_path: Path ke gambar (sudah dinormalisasi)
@@ -236,7 +236,7 @@ def extract_dimensions_from_image(
 
         return {
             "status": "ok",
-            "source": "paddleocr+gemini_vision",
+            "source": "paddleocr+9router_vision",
             "file_type": file_ext,
             "scale_detected": scale_detected,
             "total_items": len(items_ok) + len(items_flagged),

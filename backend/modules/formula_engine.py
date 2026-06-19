@@ -34,6 +34,11 @@ ITEM_TYPE_CLASSIFIER: dict[str, str] = {
     "balok": "3D_koefisien",
     "buangan": "turunan",
     "pemadatan": "turunan",
+    "besi": "linier",
+    "tulangan": "linier",
+    "pipa": "linier",
+    "kabel": "linier",
+    "profil": "linier",
 }
 
 
@@ -79,6 +84,8 @@ def build_formula(
     vol_mapping = mapping.get("kolom_volume")
     col_vol = vol_mapping["col_index"] if vol_mapping else None
     col_rumus = mapping["kolom_rumus"]["col_index"] if mapping.get("kolom_rumus") else None
+    koef_mapping = mapping.get("kolom_koefisien")
+    col_koef = koef_mapping["col_index"] if koef_mapping else None
 
     cells: dict[str, dict] = {}
     comments: dict[str, str] = {}
@@ -105,6 +112,9 @@ def build_formula(
     elif col_t and formula_type == "2D_area":
         cells[f"{col_t}{row}"] = {"value": None, "type": "empty"}
 
+    if col_koef and item.get("koefisien") is not None:
+        cells[f"{col_koef}{row}"] = {"value": item["koefisien"], "type": "dimension", "color": "#EEEDFE"}
+
     p = item.get("P")
     l = item.get("L")
     t = item.get("T")
@@ -117,6 +127,18 @@ def build_formula(
         formula_str = f"={col_p}{row}"
     elif formula_type == "linier":
         formula_str = "=" + str(p if p is not None else 1)
+    elif formula_type == "jumlah_elemen" and col_p and col_l and col_t and col_koef:
+        formula_str = f"={col_p}{row}*{col_l}{row}*{col_t}{row}*{col_koef}{row}"
+    elif formula_type == "jumlah_elemen" and col_vol and col_koef:
+        formula_str = f"={col_vol}{row}*{col_koef}{row}"
+    elif formula_type == "3D_koefisien" and col_p and col_l and col_t and col_koef:
+        formula_str = f"={col_p}{row}*{col_l}{row}*{col_t}{row}*{col_koef}{row}"
+    elif formula_type == "3D_koefisien" and col_vol and col_koef:
+        formula_str = f"={col_vol}{row}*{col_koef}{row}"
+    elif formula_type == "turunan" and col_vol and col_koef and row > 1:
+        formula_str = f"={col_vol}{row-1}*{col_koef}{row}"
+    elif formula_type == "turunan" and col_vol:
+        formula_str = f"={col_vol}{row}*1"
     else:
         pv = p if p is not None else 1
         lv = l if l is not None else 1

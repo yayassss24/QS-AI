@@ -1,4 +1,4 @@
-"""Tests for llm_router.py"""
+"""Tests for llm_router.py — 9router API."""
 
 import os
 from unittest.mock import patch, MagicMock
@@ -14,69 +14,109 @@ class TestLLMRouterInit:
         assert router.byok_key is None
 
     def test_creates_with_byok(self):
-        router = LLMRouter(byok_key="test-key")
-        assert router.byok_key == "test-key"
+        router = LLMRouter(byok_key="sk-test-key")
+        assert router.byok_key == "sk-test-key"
 
     @patch("redis.from_url", side_effect=Exception("no redis"))
     def test_fallback_to_memory_when_no_redis(self, mock_from_url):
         router = LLMRouter()
         assert router.redis is None
-        assert router._memory_usage is not None
-
-
-class TestProviderSelection:
-    def test_byok_always_uses_gemini(self):
-        router = LLMRouter(byok_key="my-key")
-        provider = router._select_provider("extract_image")
-        assert provider == "gemini_byok"
-
-    def test_extract_image_prefers_gemini(self):
-        router = LLMRouter()
-        router._memory_usage = {"gemini": 0, "groq": 0, "openrouter": 0}
-        provider = router._select_provider("extract_image")
-        assert provider == "gemini"
-
-    def test_chat_prefers_groq(self):
-        router = LLMRouter()
-        provider = router._select_provider("chat")
-        assert provider == "groq"
-
-    def test_format_detect_prefers_groq(self):
-        router = LLMRouter()
-        provider = router._select_provider("format_detect")
-        assert provider == "groq"
+        assert router._memory_usage == 0
 
 
 class TestUsageTracking:
     def test_increment_memory(self):
         router = LLMRouter()
-        router._increment_usage("gemini")
-        assert router._memory_usage["gemini"] == 1
+        router._increment_usage()
+        assert router._memory_usage == 1
 
-    def test_limit_check(self):
+    def test_limit_not_reached(self):
         router = LLMRouter()
-        router._memory_usage = {"gemini": 1400, "groq": 0, "openrouter": 0}
-        provider = router._select_provider("extract_image")
-        assert provider == "openrouter_vision"
+        router._memory_usage = 0
+        assert router._check_limit() is True
 
-    def test_all_providers_exhausted_raises(self):
+    def test_limit_reached(self):
         router = LLMRouter()
-        router._memory_usage = {
-            "gemini": 1400, "groq": 900, "openrouter": 950,
-        }
+        router._memory_usage = 2000
+        assert router._check_limit() is False
+
+    def test_limit_raises(self):
+        router = LLMRouter()
+        router._memory_usage = 2000
         with pytest.raises(RuntimeError, match="limit"):
-            router._select_provider("extract_image")
+            router.call("chat", "test")
 
 
-class TestFailover:
-    def test_failover_chain_falls_back(self):
+class TestCall:
+    def test_call_text_success(self):
         router = LLMRouter()
-        router._memory_usage = {"gemini": 0, "groq": 0, "openrouter": 0}
+        with patch("modules.llm_router.LLMRouter._call_text") as mock_call:
+            mock_call.return_value = "response text"
+            result = router.call("chat", "hello")
+            assert result == "response text"
 
-        with patch.object(router, '_call_gemini') as mock_g:
-            mock_g.side_effect = Exception("gemini fail")
-            with patch.object(router, '_call_groq') as mock_gr:
-                mock_gr.return_value = "groq response"
-                result = router.call("chat", "test prompt")
-                assert result == "groq response"
-                mock_gr.assert_called_once_with("test prompt")
+    def test_call_vision_success(self):
+        router = LLMRouter()
+        with patch("modules.llm_router.LLMRouter._call_vision") as mock_call:
+            mock_call.return_value = "vision response"
+            result = router.call("extract_image", "analyze", image_b64="abc123")
+            assert result == "vision response"
+
+    def test_call_missing_api_key(self):
+        router = LLMRouter()
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(RuntimeError, match="9ROUTER_API_KEY"):
+                router.call("chat", "test")
+
+    def test_call_with_byok_key(self):
+        router = LLMRouter(byok_key="sk-byok-key")
+        with (
+            patch("modules.llm_router.LLMRouter._call_text") as mock_call,
+            patch.dict(os.environ, {"9ROUTER_API_KEY": "sk-env-key"}, clear=True),
+        ):
+            mock_call.return_value = "ok"
+            router.call("chat", "test")
+            # BYOK key harus dipakai, bukan env key
+            args, kwargs = mock_call.call_args
+            assert args[0] == "sk-byok-key"
+
+
+class TestOpenAIIntegration:
+    def test_call_text_uses_openai_client(self):
+        router = LLMRouter()
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "1"
+
+        with (
+            patch("openai.OpenAI") as mock_openai,
+            patch.dict(os.environ, {"9ROUTER_API_KEY": "sk-test"}, clear=True),
+        ):
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_openai.return_value = mock_client
+
+            result = router._call_text("sk-test", "http://localhost:20128/v1", "groq/llama-3.3-70b-versatile", "test")
+            assert result == "1"
+            mock_openai.assert_called_once_with(
+                base_url="http://localhost:20128/v1",
+                api_key="sk-test",
+            )
+
+    def test_call_vision_uses_openai_client(self):
+        router = LLMRouter()
+        mock_response = MagicMock()
+        mock_response.choices[0].message.content = "vision result"
+
+        with (
+            patch("openai.OpenAI") as mock_openai,
+            patch.dict(os.environ, {"9ROUTER_API_KEY": "sk-test"}, clear=True),
+        ):
+            mock_client = MagicMock()
+            mock_client.chat.completions.create.return_value = mock_response
+            mock_openai.return_value = mock_client
+
+            result = router._call_vision("sk-test", "http://localhost:20128/v1", "gemini/gemini-3.1-flash-lite-preview", "analyze", "imgdata")
+            assert result == "vision result"
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            assert call_kwargs["model"] == "gemini/gemini-3.1-flash-lite-preview"
+            assert "image_url" in str(call_kwargs["messages"][0]["content"][1])

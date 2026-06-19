@@ -74,7 +74,8 @@ class TestBYOKKeyManagement:
     def test_get_key_returns_none_for_unknown(self):
         assert self.manager.get_key("nonexistent") is None
 
-    def test_save_invalid_key_returns_false(self):
+    @patch.object(BYOKManager, "validate_key", return_value={"valid": False, "quota_remaining": 0, "error": "invalid key"})
+    def test_save_invalid_key_returns_false(self, mock_validate):
         result = self.manager.save_key("user1", "bad-key")
         assert result is False
 

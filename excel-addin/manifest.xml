@@ -14,7 +14,7 @@
     <Host Name="Workbook" />
   </Hosts>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://localhost:8000/static/excel-addin/taskpane.html" />
+    <SourceLocation DefaultValue="http://localhost:8000/static/excel-addin/taskpane.html" />
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
 </OfficeApp>

@@ -107,7 +107,7 @@ class BYOKManager:
 
     def validate_key(self, api_key: str) -> dict:
         """
-        Validasi API key dengan test call ke Gemini.
+        Validasi API key dengan test call ke 9router.
 
         Args:
             api_key: API key yang akan divalidasi
@@ -116,10 +116,15 @@ class BYOKManager:
             dict dengan valid, quota_remaining, error
         """
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.0-flash")
-            model.generate_content("Balas dengan angka 1 saja.")
+            from openai import OpenAI
+            base_url = os.getenv("9ROUTER_BASE_URL", "http://localhost:20128/v1").rstrip("/")
+            model = os.getenv("9ROUTER_MODEL", "groq/llama-3.3-70b-versatile")
+            client = OpenAI(base_url=base_url, api_key=api_key)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "Balas dengan angka 1 saja."}],
+                max_tokens=10,
+            )
             return {
                 "valid": True,
                 "quota_remaining": 1500,

@@ -57,6 +57,39 @@ Update berhasil. Galian Tanah baris 4: P=12.5 × L=0.8 × T=1.20 = 12.00 m³
         self.router = llm_router
         self.conversation_history: list[dict] = []
 
+    MAX_HISTORY = 20
+
+    def _flag_items(self, boq_state: list[dict]) -> list[dict]:
+        flagged = []
+        for i, item in enumerate(boq_state):
+            flags = []
+            conf = item.get("confidence", 1.0)
+            if conf < 0.7:
+                flags.append(f"Confidence rendah ({conf})")
+
+            nama = (item.get("nama_item") or "").lower()
+            tipe_3d = any(kw in nama for kw in ["galian", "beton", "urugan", "pondasi", "sloof", "pasangan"])
+            if tipe_3d:
+                if item.get("P") is None:
+                    flags.append("Panjang (P) tidak terbaca")
+                if item.get("L") is None:
+                    flags.append("Lebar (L) tidak terbaca")
+                if item.get("T") is None:
+                    flags.append("Tinggi/Kedalaman (T) tidak terbaca")
+
+            if item.get("P") is not None and item["P"] > 100:
+                flags.append(f"Panjang {item['P']}m tidak realistis")
+            if item.get("T") is not None and item["T"] > 10:
+                flags.append(f"Tinggi {item['T']}m tidak realistis")
+
+            if flags:
+                flagged.append({
+                    "index": i,
+                    "nama_item": item.get("nama_item", ""),
+                    "alasan": "; ".join(flags),
+                })
+        return flagged
+
     def chat(
         self,
         user_message: str,
@@ -83,16 +116,27 @@ Update berhasil. Galian Tanah baris 4: P=12.5 × L=0.8 × T=1.20 = 12.00 m³
             json_boq=json.dumps(boq_state[:20], ensure_ascii=False, indent=2),
         )
 
-        full_prompt = f"{system}\n\nUser: {user_message}"
+        history_text = ""
+        if self.conversation_history:
+            parts = []
+            for h in self.conversation_history[-5:]:
+                parts.append(f"User: {h['user']}\nAssistant: {h['assistant']}")
+            history_text = "\n\nRIWAYAT PERCAKAPAN:\n" + "\n---\n".join(parts)
+
+        full_prompt = f"{system}{history_text}\n\nUser: {user_message}"
         response_text = self.router.call("chat", full_prompt)
         action = self._extract_action(response_text)
 
         self.conversation_history.append({"user": user_message, "assistant": response_text})
+        if len(self.conversation_history) > self.MAX_HISTORY:
+            self.conversation_history = self.conversation_history[-self.MAX_HISTORY:]
+
+        flagged_items = self._flag_items(boq_state)
 
         return {
             "response_text": response_text,
             "action": action,
-            "flagged_items": [],
+            "flagged_items": flagged_items,
         }
 
     def _extract_action(self, response_text: str) -> dict:
