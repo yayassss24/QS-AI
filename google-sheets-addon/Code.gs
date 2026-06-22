@@ -4,7 +4,7 @@
  * Menu, sidebar, sheet write, backend communication
  */
 
-let BACKEND_URL = PropertiesService.getScriptProperties().getProperty("BACKEND_URL") || "http://localhost:8000";
+let BACKEND_URL = PropertiesService.getScriptProperties().getProperty("BACKEND_URL") || "https://irresolutely-vibronic-bulah.ngrok-free.dev";
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -62,7 +62,7 @@ function callBackend(endpoint, payload) {
 // === FILE UPLOAD (base64 → multipart) ===
 function processFileUpload(base64Data, filename, mimeType, scale) {
   const decoded = Utilities.base64Decode(base64Data);
-  const blob = Utilities.newBlob(decoded, mimeType || "application/octet-stream", filename);
+  const blob = Utilities.newBlob(decoded, "application/octet-stream", filename);
   const userId = getUserSessionId();
 
   const payload = { file: blob, user_id: userId };
@@ -76,20 +76,43 @@ function processFileUpload(base64Data, filename, mimeType, scale) {
   return response.getContentText();
 }
 
-// === GENERATE BOQ (kirim template sheet + dimensions) ===
+// === GENERATE BOQ (kirim headers + dimensions via JSON) ===
 function generateBoq(dimensionsJson) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const templateBlob = ss.getAs("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    .setName("template.xlsx");
-  const userId = getUserSessionId();
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const lastCol = sheet.getLastColumn();
 
-  const response = UrlFetchApp.fetch(BACKEND_URL + "/api/compute-boq", {
+  let headers = [];
+  let columnMap = {};
+  if (lastCol > 0) {
+    const values = sheet.getRange(1, 1, 3, lastCol).getValues();
+    for (let row = 0; row < 3; row++) {
+      headers = [];
+      columnMap = {};
+      for (let col = 0; col < lastCol; col++) {
+        const val = values[row][col];
+        if (val && String(val).trim()) {
+          const key = String(val).trim();
+          headers.push(key);
+          columnMap[key] = col + 1;
+        }
+      }
+      if (headers.length > 0) break;
+    }
+  }
+
+  if (headers.length === 0) {
+    headers = ["Uraian Pekerjaan", "P", "L", "T", "Satuan", "Volume"];
+  }
+
+  const userId = getUserSessionId();
+  const response = UrlFetchApp.fetch(BACKEND_URL + "/api/compute-boq-from-json", {
     method: "POST",
-    payload: {
-      template_file: templateBlob,
-      dimensions_json: dimensionsJson,
-      user_id: userId,
-    },
+    contentType: "application/json",
+    payload: JSON.stringify({
+      dimensions: JSON.parse(dimensionsJson),
+      headers: headers,
+      column_map: Object.keys(columnMap).length > 0 ? columnMap : undefined,
+    }),
     muteHttpExceptions: true,
   });
   return response.getContentText();

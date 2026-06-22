@@ -130,7 +130,7 @@
                 var total = data.data && data.data.items ? data.data.items.length : 0;
                 setStatus(el, 'Ekstraksi berhasil: ' + total + ' item', 'ok');
               } else {
-                setStatus(el, 'Error: ' + (data.message || 'Gagal'), 'error');
+              setStatus(el, 'Error: ' + (data.message || data.detail || JSON.stringify(data)), 'error');
               }
             })
             .withFailureHandler(function(err) {

@@ -261,12 +261,14 @@ async def compute_boq_from_json(request: dict):
     """Compute BOQ formulas dari JSON headers (untuk Excel Add-in tanpa upload template)."""
     dimensions = request.get("dimensions")
     headers = request.get("headers")
+    column_map = request.get("column_map")
     if not dimensions or not headers:
         raise HTTPException(400, "dimensions dan headers required")
 
     from modules.template_detector import detect_template_format
     from modules.formula_engine import build_formula
     from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
 
     wb = Workbook()
     ws = wb.active
@@ -279,6 +281,14 @@ async def compute_boq_from_json(request: dict):
 
     try:
         mapping = detect_template_format(tmp.name)
+
+        if column_map:
+            for category, cat_info in mapping["mapping"].items():
+                if cat_info and cat_info.get("nama_kolom") in column_map:
+                    actual_col = column_map[cat_info["nama_kolom"]]
+                    cat_info["col_num"] = actual_col
+                    cat_info["col_index"] = get_column_letter(actual_col)
+
         boq_data = []
         for i, item in enumerate(dimensions.get("items", [])):
             formula_data = build_formula(

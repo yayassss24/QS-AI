@@ -92,25 +92,40 @@ def build_formula(
 
     conf = item.get("confidence", 1.0)
 
-    if col_p and item.get("P") is not None:
+    if col_p:
         cell_p = f"{col_p}{row}"
-        cells[cell_p] = {"value": item["P"], "type": "dimension", "color": "#EEEDFE"}
-        if conf < 0.7:
-            comments[cell_p] = "⚠️ Perlu verifikasi manual — AI kurang yakin"
+        val_p = item.get("P")
+        if val_p is not None:
+            cells[cell_p] = {"value": val_p, "type": "dimension", "color": "#EEEDFE"}
+            if conf < 0.7:
+                comments[cell_p] = "⚠️ Perlu verifikasi manual — AI kurang yakin"
+        else:
+            cells[cell_p] = {"value": 1.0, "type": "dimension", "color": "#F0F0F0"}
+            comments[cell_p] = "Dimensi P tidak terbaca — default 1.0, sesuaikan manual"
 
-    if col_l and item.get("L") is not None:
+    if col_l:
         cell_l = f"{col_l}{row}"
-        cells[cell_l] = {"value": item["L"], "type": "dimension", "color": "#EEEDFE"}
-        if conf < 0.7:
-            comments[cell_l] = "⚠️ Perlu verifikasi manual — AI kurang yakin"
+        val_l = item.get("L")
+        if val_l is not None:
+            cells[cell_l] = {"value": val_l, "type": "dimension", "color": "#EEEDFE"}
+            if conf < 0.7:
+                comments[cell_l] = "⚠️ Perlu verifikasi manual — AI kurang yakin"
+        else:
+            cells[cell_l] = {"value": 1.0, "type": "dimension", "color": "#F0F0F0"}
+            comments[cell_l] = "Dimensi L tidak terbaca — default 1.0, sesuaikan manual"
 
-    if col_t and item.get("T") is not None:
+    if col_t:
         cell_t = f"{col_t}{row}"
-        cells[cell_t] = {"value": item["T"], "type": "dimension", "color": "#EEEDFE"}
-        if conf < 0.7:
-            comments[cell_t] = "⚠️ Perlu verifikasi manual — AI kurang yakin"
-    elif col_t and formula_type == "2D_area":
-        cells[f"{col_t}{row}"] = {"value": None, "type": "empty"}
+        val_t = item.get("T")
+        if val_t is not None:
+            cells[cell_t] = {"value": val_t, "type": "dimension", "color": "#EEEDFE"}
+            if conf < 0.7:
+                comments[cell_t] = "⚠️ Perlu verifikasi manual — AI kurang yakin"
+        elif formula_type == "2D_area":
+            cells[cell_t] = {"value": None, "type": "empty"}
+        else:
+            cells[cell_t] = {"value": 1.0, "type": "dimension", "color": "#F0F0F0"}
+            comments[cell_t] = "Dimensi T tidak terbaca — default 1.0, sesuaikan manual"
 
     if col_koef and item.get("koefisien") is not None:
         cells[f"{col_koef}{row}"] = {"value": item["koefisien"], "type": "dimension", "color": "#EEEDFE"}
